@@ -292,11 +292,29 @@
                 let staf_sisa = alokasi_akhir.filter(s => staff_list.includes(s));
                 let crew_sisa = alokasi_akhir.filter(c => crew_list.includes(c));
 
+                // ROTASI OTOMATIS: Menggeser urutan nama berdasarkan hari (agar tidak stagnan saat ada yang cuti panjang)
+                if (staf_sisa.length > 0) {
+                    staf_sisa = [...staf_sisa.slice(hari % staf_sisa.length), ...staf_sisa.slice(0, hari % staf_sisa.length)];
+                }
+                if (crew_sisa.length > 0) {
+                    crew_sisa = [...crew_sisa.slice(hari % crew_sisa.length), ...crew_sisa.slice(0, hari % crew_sisa.length)];
+                }
+
                 // Sebar Crew
                 crew_sisa.forEach(c => {
                     let crew_di_pagi = shift_pagi.some(x => crew_list.includes(x));
-                    if (shift_pagi.length < 2 && !crew_di_pagi) shift_pagi.push(c);
-                    else shift_siang.push(c);
+                    let crew_di_siang = shift_siang.some(x => crew_list.includes(x));
+
+                    // Jika kedua shift belum ada crew, ganti-gantian masuk pagi/siang berdasarkan tanggal ganjil-genap
+                    if (!crew_di_pagi && !crew_di_siang) {
+                        if (hari % 2 === 0 && shift_siang.length < 2) shift_siang.push(c);
+                        else if (shift_pagi.length < 2) shift_pagi.push(c);
+                        else shift_siang.push(c);
+                    } else if (!crew_di_pagi && shift_pagi.length < 2) {
+                        shift_pagi.push(c);
+                    } else {
+                        shift_siang.push(c);
+                    }
                 });
 
                 // Sebar Staf
