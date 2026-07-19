@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplikasi Jadwal Kerja Pro</title>
+    <!-- Library untuk Ekspor Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg-color: #f8fafc;
+            --sidebar-bg: #1e293b;
+            --sidebar-text: #f1f5f9;
+            --text-main: #334155;
+            --border: #e2e8f0;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+        }
+        /* Layout */
+        .sidebar {
+            width: 320px;
+            background-color: var(--sidebar-bg);
+            color: var(--sidebar-text);
+            padding: 20px;
+            overflow-y: auto;
+            box-sizing: border-box;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+        }
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+        h1, h2, h3 { margin-top: 0; }
+        .title { color: var(--primary); font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+        .subtitle { font-size: 14px; color: #64748b; margin-bottom: 25px; }
+        
+        /* Form Elements */
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: #cbd5e1; }
+        input[type="text"], select {
+            width: 100%;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #475569;
+            background-color: #334155;
+            color: white;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        input[type="text"]::placeholder { color: #94a3b8; }
+        .sidebar h3 { color: #38bdf8; font-size: 16px; margin-top: 20px; border-bottom: 1px solid #475569; padding-bottom: 8px; }
+        
+        /* Buttons */
+        .btn {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            transition: 0.2s;
+            display: inline-block;
+            margin-top: 15px;
+        }
+        .btn:hover { background-color: var(--primary-hover); }
+        .btn-success { background-color: #16a34a; margin-left: 10px; }
+        .btn-success:hover { background-color: #15803d; }
+        
+        /* Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th { background-color: #f1f5f9; font-weight: bold; color: #475569; }
+        tr:hover { background-color: #f8fafc; }
+        td { font-size: 14px; }
+        
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            body { flex-direction: column; overflow: auto; height: auto; }
+            .sidebar { width: 100%; box-shadow: none; overflow: visible; }
+            .main-content { overflow: visible; padding: 15px; }
+            table { display: block; overflow-x: auto; white-space: nowrap; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- SIDEBAR KIRI -->
+    <div class="sidebar">
+        <h2>Atur Jadwal</h2>
+        
+        <h3>1. Request Cuti / Libur</h3>
+        <p style="font-size: 11px; color: #94a3b8; margin-top: -5px;">Ketik tanggal pisahkan dengan koma (Contoh: 5, 6, 12)</p>
+        <div id="cuti-container"></div>
+
+        <h3>2. Perbantuan SO</h3>
+        <p style="font-size: 11px; color: #94a3b8; margin-top: -5px;">Pilih petugas SO per tanggal</p>
+        <div id="so-container"></div>
+    </div>
+
+    <!-- KONTEN KANAN -->
+    <div class="main-content">
+        <div class="title" id="app-title">Aplikasi Jadwal Kerja Otomatis</div>
+        <div class="subtitle">Fitur: Rolling Shift, Cuti, Perbantuan SO, dan Request Khusus Permanen (Rio j).</div>
+        
+        <div>
+            <button class="btn" onclick="generateAndRenderSchedule()">Buat Jadwal Baru</button>
+            <button class="btn btn-success" onclick="exportExcel()">Download ke Excel</button>
+        </div>
+
+        <div id="table-container"></div>
+    </div>
+
+    <script>
+        // Data Karyawan
+        const karyawan = [
+            { Nama: "Rio j", Jabatan: "Staf" },
+            { Nama: "Ibnu", Jabatan: "Staf" },
+            { Nama: "Julai", Jabatan: "Staf" },
+            { Nama: "Lela", Jabatan: "Crew" },
+            { Nama: "Alfaqih", Jabatan: "Crew" }
+        ];
+        
+        const staff_list = karyawan.filter(k => k.Jabatan === 'Staf').map(k => k.Nama);
+        const crew_list = karyawan.filter(k => k.Jabatan === 'Crew').map(k => k.Nama);
+        const semua_karyawan = karyawan.map(k => k.Nama);
+
+        // Deteksi Waktu Berjalan
+        const now = new Date();
+        const nama_bulan = now.toLocaleString('id-ID', { month: 'long', year: 'numeric' });
+        const num_days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        
+        document.getElementById('app-title').innerText = `Aplikasi Jadwal Kerja Otomatis (${nama_bulan})`;
+
+        // Render Input Cuti
+        const cutiContainer = document.getElementById('cuti-container');
+        karyawan.forEach(k => {
+            cutiContainer.innerHTML += `
+                <div class="form-group">
+                    <label>Libur/Cuti ${k.Nama}</label>
+                    <input type="text" id="cuti_${k.Nama.replace(/\s+/g, '_')}" placeholder="Cth: 1, 15, 20">
+                </div>
+            `;
+        });
+
+        // Render Input SO
+        const soContainer = document.getElementById('so-container');
+        let soHtml = `<div style="max-height: 300px; overflow-y: auto; padding-right: 5px;">`;
+        for(let i = 1; i <= num_days; i++) {
+            let options = `<option value="">Tidak Ada</option>`;
+            semua_karyawan.forEach(nama => options += `<option value="${nama}">${nama}</option>`);
+            soHtml += `
+                <div class="form-group">
+                    <label>Tanggal ${i}</label>
+                    <select id="so_${i}">${options}</select>
+                </div>
+            `;
+        }
+        soHtml += `</div>`;
+        soContainer.innerHTML = soHtml;
+
+        let globalJadwal = []; 
+
+        function parseCuti() {
+            let req_libur = {};
+            karyawan.forEach(k => {
+                let id = `cuti_${k.Nama.replace(/\s+/g, '_')}`;
+                let val = document.getElementById(id).value;
+                if(val) {
+                    let dates = val.split(',').map(d => parseInt(d.trim())).filter(d => !isNaN(d));
+                    dates.forEach(d => {
+                        if(!req_libur[d]) req_libur[d] = [];
+                        req_libur[d].push(k.Nama);
+                    });
+                }
+            });
+            return req_libur;
+        }
+
+        function parseSO() {
+            let req_so = {};
+            for(let i = 1; i <= num_days; i++) {
+                let val = document.getElementById(`so_${i}`).value;
+                if(val) req_so[i] = val;
+            }
+            return req_so;
+        }
+
+        // ALGORITMA UTAMA
+        function generateSchedule(req_libur, req_so, total_hari) {
+            let jadwal = [];
+            let status_kemarin = {};
+            semua_karyawan.forEach(nama => status_kemarin[nama] = "Kerja");
+
+            for (let hari = 1; hari <= total_hari; hari++) {
+                let hari_esok = hari + 1;
+                let petugas_so = req_so[hari] || null;
+                
+                let yg_libur = [];
+                let yg_kerja = [];
+
+                if (petugas_so !== null) {
+                    yg_libur = [];
+                    yg_kerja = [...semua_karyawan];
+                } else {
+                    yg_libur = req_libur[hari] || [];
+                    if (yg_libur.length === 0) {
+                        yg_libur = [semua_karyawan[(hari - 1) % semua_karyawan.length]];
+                    }
+                    
+                    // PROTEKSI KHUSUS RIO J
+                    if (yg_libur.includes("Rio j") && [1, 15, 16, total_hari].includes(hari)) {
+                        let reqHariIni = req_libur[hari] || [];
+                        if (!reqHariIni.includes("Rio j")) {
+                            yg_libur = yg_libur.filter(k => k !== "Rio j");
+                            if (yg_libur.length === 0) {
+                                yg_libur = [semua_karyawan[hari % semua_karyawan.length]];
+                            }
+                        }
+                    }
+                    yg_kerja = semua_karyawan.filter(k => !yg_libur.includes(k));
+                }
+
+                let kandidat_shift = yg_kerja.filter(k => k !== petugas_so);
+                let shift_pagi = [];
+                let shift_siang = [];
+
+                // 1. KUNCI RIO J
+                let rio_terplot = false;
+                if (kandidat_shift.includes("Rio j")) {
+                    if (hari === 15) { shift_siang.push("Rio j"); rio_terplot = true; }
+                    else if (hari === 16) { shift_pagi.push("Rio j"); rio_terplot = true; }
+                    else if (hari === 1) { shift_pagi.push("Rio j"); rio_terplot = true; }
+                    else if (hari === total_hari) { shift_siang.push("Rio j"); rio_terplot = true; }
+                }
+
+                let kandidat_sisa_prioritas = kandidat_shift.filter(k => !(k === "Rio j" && rio_terplot));
+                
+                // 2. PRIORITAS ROLLING
+                let wajib_pagi = [];
+                let wajib_siang = [];
+                
+                if (petugas_so === null) {
+                    kandidat_sisa_prioritas.forEach(k => {
+                        let orang_libur_besok = req_libur[hari_esok] || [];
+                        if (orang_libur_besok.length === 0 && semua_karyawan[(hari_esok - 1) % semua_karyawan.length] === k) {
+                            orang_libur_besok = [k];
+                        }
+                        if (req_so[hari_esok]) {
+                            orang_libur_besok = [];
+                        }
+                        if (orang_libur_besok.includes(k)) wajib_pagi.push(k);
+                    });
+
+                    kandidat_sisa_prioritas.forEach(k => {
+                        if (status_kemarin[k] === "Libur" && !wajib_pagi.includes(k)) {
+                            wajib_siang.push(k);
+                        }
+                    });
+                }
+
+                // Distribusi Wajib
+                wajib_pagi.forEach(k => { if(shift_pagi.length < 2) shift_pagi.push(k); else shift_siang.push(k); });
+                wajib_siang.forEach(k => { if(shift_siang.length < 2) shift_siang.push(k); else shift_pagi.push(k); });
+
+                // 3. SISA KARYAWAN
+                let alokasi_akhir = kandidat_shift.filter(k => !shift_pagi.includes(k) && !shift_siang.includes(k));
+                let staf_sisa = alokasi_akhir.filter(s => staff_list.includes(s));
+                let crew_sisa = alokasi_akhir.filter(c => crew_list.includes(c));
+
+                // Sebar Crew
+                crew_sisa.forEach(c => {
+                    let crew_di_pagi = shift_pagi.some(x => crew_list.includes(x));
+                    if (shift_pagi.length < 2 && !crew_di_pagi) shift_pagi.push(c);
+                    else shift_siang.push(c);
+                });
+
+                // Sebar Staf
+                staf_sisa.forEach(s => {
+                    if (shift_pagi.length < 2) shift_pagi.push(s);
+                    else shift_siang.push(s);
+                });
+
+                // Catat status esok
+                semua_karyawan.forEach(nama => {
+                    if (yg_libur.includes(nama)) status_kemarin[nama] = "Libur";
+                    else status_kemarin[nama] = "Kerja";
+                });
+
+                jadwal.push({
+                    "Tanggal": hari,
+                    "Libur / Cuti": yg_libur.length > 0 ? yg_libur.join(", ") : "-",
+                    "Shift Pagi": shift_pagi.length > 0 ? shift_pagi.join(" & ") : "-",
+                    "Shift Siang": shift_siang.length > 0 ? shift_siang.join(" & ") : "-",
+                    "Perbantuan SO": petugas_so ? petugas_so : "-"
+                });
+            }
+            return jadwal;
+        }
+
+        function generateAndRenderSchedule() {
+            let req_libur = parseCuti();
+            let req_so = parseSO();
+            globalJadwal = generateSchedule(req_libur, req_so, num_days);
+            
+            let tableHtml = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tanggal</th>
+                            <th>Libur / Cuti</th>
+                            <th>Shift Pagi</th>
+                            <th>Shift Siang</th>
+                            <th>Perbantuan SO</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            globalJadwal.forEach(row => {
+                tableHtml += `
+                    <tr>
+                        <td>${row.Tanggal}</td>
+                        <td>${row["Libur / Cuti"]}</td>
+                        <td>${row["Shift Pagi"]}</td>
+                        <td>${row["Shift Siang"]}</td>
+                        <td>${row["Perbantuan SO"]}</td>
+                    </tr>
+                `;
+            });
+            tableHtml += `</tbody></table>`;
+            document.getElementById('table-container').innerHTML = tableHtml;
+        }
+
+        function exportExcel() {
+            if(globalJadwal.length === 0) {
+                alert("Silakan buat jadwal terlebih dahulu!");
+                return;
+            }
+            const worksheet = XLSX.utils.json_to_sheet(globalJadwal);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Jadwal Kerja");
+            XLSX.writeFile(workbook, `Jadwal_Kerja_${nama_bulan.replace(' ', '_')}.xlsx`);
+        }
+
+        // Generate default on load
+        window.onload = generateAndRenderSchedule;
+    </script>
+</body>
+</html>
