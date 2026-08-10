@@ -110,7 +110,7 @@
 
     <div class="main-content">
         <div class="title" id="app-title">Aplikasi Jadwal Kerja Otomatis</div>
-        <div class="subtitle">Fitur: Auto-Save, Reset Awal Bulan, Rolling Shift, Cuti, SO, & Request Khusus (Rio j).</div>
+        <div class="subtitle">Fitur: Porsi Libur 5x/Bulan, Auto-Save, Rolling Shift, Cuti, SO, & Request Khusus.</div>
         
         <div>
             <button class="btn" onclick="generateAndRenderSchedule()">Refresh Jadwal</button>
@@ -153,7 +153,7 @@
             `;
         });
 
-        // Render Input SO (tanpa max-height agar bisa diklik di HP)
+        // Render Input SO
         const soContainer = document.getElementById('so-container');
         let soHtml = `<div>`;
         for(let i = 1; i <= num_days; i++) {
@@ -189,13 +189,11 @@
             let memori = localStorage.getItem('jadwal_kerja_memori');
             if (memori) {
                 let data = JSON.parse(memori);
-                // Reset memori jika bulan atau tahun sudah berganti (Otomatis Reset)
                 if (data.bulan !== currentMonth || data.tahun !== currentYear) {
                     localStorage.removeItem('jadwal_kerja_memori');
                     return;
                 }
                 
-                // Isi kembali data ke inputan
                 karyawan.forEach(k => {
                     let id = `cuti_${k.Nama.replace(/\s+/g, '_')}`;
                     if(data.cuti[id]) document.getElementById(id).value = data.cuti[id];
@@ -241,6 +239,30 @@
 
         // --- ALGORITMA PENJADWALAN ---
         function generateSchedule(req_libur, req_so, total_hari) {
+            
+            // 1. GENERATOR 5 HARI LIBUR OTOMATIS PER PERSONIL
+            // Algoritma pemetaan jarak untuk menghasilkan porsi 5x libur dengan interval 5/6 hari kerja
+            let null_indices = [];
+            if (total_hari === 31) null_indices = [5, 11, 17, 23, 29, 30]; // 6 Hari full team
+            else if (total_hari === 30) null_indices = [5, 11, 17, 23, 29]; // 5 Hari full team
+            else if (total_hari === 29) null_indices = [6, 14, 21, 28]; // 4 Hari full team
+            else if (total_hari === 28) null_indices = [8, 17, 27]; // 3 Hari full team
+            
+            let auto_libur_harian = new Array(total_hari).fill(null);
+            let pool_idx = 0;
+            
+            for(let d = 0; d < total_hari; d++) {
+                if(null_indices.includes(d)) {
+                    auto_libur_harian[d] = null; // Tidak ada yang libur otomatis hari ini
+                } else {
+                    if(pool_idx < 25) { 
+                        // Offset +4 untuk menggeser rotasi agar Rio j tidak pernah dapat libur otomatis di Tgl 1, 15, 16, dan Akhir bulan
+                        auto_libur_harian[d] = semua_karyawan[(pool_idx + 4) % 5];
+                        pool_idx++;
+                    }
+                }
+            }
+
             let jadwal = [];
             let status_kemarin = {};
             semua_karyawan.forEach(nama => status_kemarin[nama] = "Kerja");
@@ -257,19 +279,23 @@
                     yg_kerja = [...semua_karyawan];
                 } else {
                     yg_libur = req_libur[hari] || [];
+                    
+                    // Tarik jadwal libur otomatis jika tidak ada manual request
                     if (yg_libur.length === 0) {
-                        yg_libur = [semua_karyawan[(hari - 1) % semua_karyawan.length]];
+                        let auto_person = auto_libur_harian[hari - 1]; 
+                        if (auto_person !== null) {
+                            yg_libur = [auto_person];
+                        }
                     }
                     
+                    // Keamanan ekstra untuk Rio j (hanya berjaga-jaga jika ada intervensi lain)
                     if (yg_libur.includes("Rio j") && [1, 15, 16, total_hari].includes(hari)) {
                         let reqHariIni = req_libur[hari] || [];
                         if (!reqHariIni.includes("Rio j")) {
                             yg_libur = yg_libur.filter(k => k !== "Rio j");
-                            if (yg_libur.length === 0) {
-                                yg_libur = [semua_karyawan[hari % semua_karyawan.length]];
-                            }
                         }
                     }
+                    
                     yg_kerja = semua_karyawan.filter(k => !yg_libur.includes(k));
                 }
 
@@ -290,12 +316,142 @@
                 let wajib_pagi = [];
                 let wajib_siang = [];
                 
-                if (petugas_so === null) {
-                    kandidat_sisa_prioritas.forEach(k => {
-                        let orang_libur_besok = req_libur[hari_esok] || [];
-                        if (orang_libur_besok.length === 0 && semua_karyawan[(hari_esok - 1) % semua_karyawan.length] === k) {
-                            orang_libur_besok = [k];
+                if (petugas_so === nullTentu, ini adalah pembaruan pada algoritma untuk memenuhi kebutuhan porsi libur **pasti 5 kali dalam sebulan per orang** (ritme 5/6 hari kerja lalu libur), serta mengakomodasi shift berisi **3 orang** pada hari di mana semua personel masuk (tidak ada yang libur).
+
+Saya telah memodifikasi fungsi `generateSchedule` menggunakan **sistem jatah libur** (kuota 5 hari per bulan per orang) dan melacak **hari kerja berturut-turut** agar algoritmanya bisa dinamis tanpa merusak request cuti maupun aturan khusus (Rio j).
+
+Silakan ganti fungsi `generateSchedule()` yang lama dengan kode di bawah ini:
+
+```javascript
+        // --- ALGORITMA PENJADWALAN (UPDATE: JATAH LIBUR 5X SEBULAN) ---
+        function generateSchedule(req_libur, req_so, total_hari) {
+            let jadwal = [];
+            let status_kemarin = {};
+            
+            // Memori untuk menghitung hak libur dan hari kerja berturut-turut
+            let jatah_libur = {};
+            let hari_kerja = {};
+            
+            semua_karyawan.forEach(nama => {
+                status_kemarin[nama] = "Kerja";
+                jatah_libur[nama] = 5; // Kuota pasti 5 hari libur per bulan
+                hari_kerja[nama] = 0;  // Hitungan kerja berturut-turut
+            });
+
+            // 1. Kurangi jatah libur dari request manual terlebih dahulu
+            for (let h = 1; h <= total_hari; h++) {
+                let req = req_libur[h] || [];
+                req.forEach(nama => {
+                    if (jatah_libur[nama] > 0) jatah_libur[nama]--;
+                });
+            }
+
+            for (let hari = 1; hari <= total_hari; hari++) {
+                let hari_esok = hari + 1;
+                let petugas_so = req_so[hari] || null;
+                
+                let yg_libur = [];
+                let yg_kerja = [];
+
+                // 2. Tentukan siapa yang libur hari ini
+                if (petugas_so !== null) {
+                    yg_libur = []; // Jika ada SO, semua masuk (kecuali yg tugas SO)
+                    yg_kerja = [...semua_karyawan];
+                } else {
+                    yg_libur = req_libur[hari] ? [...req_libur[hari]] : [];
+                    
+                    // Logika Auto-Libur berdasarkan Jatah & Hari Kerja (5/6 hari kerja lalu libur)
+                    if (yg_libur.length === 0) {
+                        let kandidat = semua_karyawan.filter(k => jatah_libur[k] > 0);
+                        if (kandidat.length > 0) {
+                            // Urutkan prioritas: Paling lama bekerja, lalu sisa jatah libur
+                            kandidat.sort((a, b) => {
+                                if (hari_kerja[b] !== hari_kerja[a]) return hari_kerja[b] - hari_kerja[a];
+                                return jatah_libur[b] - jatah_libur[a];
+                            });
+
+                            let terpilih = kandidat[0];
+                            let sisa_hari = total_hari - hari + 1;
+                            let total_sisa_jatah = semua_karyawan.reduce((sum, k) => sum + jatah_libur[k], 0);
+
+                            // Ambil libur JIKA sisa jatah tim mengharuskan ada yang libur tiap hari,
+                            // ATAU personel tersebut sudah bekerja minimal 5 hari berturut-turut
+                            if (total_sisa_jatah >= sisa_hari || hari_kerja[terpilih] >= 5) {
+                                yg_libur = [terpilih];
+                                jatah_libur[terpilih]--;
+                            }
                         }
+                    }
+                    
+                    // 3. Logika Proteksi Khusus Rio j (Swap otomatis jika hari tidak diizinkan)
+                    if (yg_libur.includes("Rio j") && [1, 15, 16, total_hari].includes(hari)) {
+                        let reqHariIni = req_libur[hari] || [];
+                        if (!reqHariIni.includes("Rio j")) { // Jika ini dari auto-libur, bukan manual
+                            yg_libur = yg_libur.filter(k => k !== "Rio j");
+                            jatah_libur["Rio j"]++; // Kembalikan jatahnya
+                            
+                            // Cari pengganti Rio j yang masih punya jatah
+                            let k_pengganti = semua_karyawan.filter(k => k !== "Rio j" && jatah_libur[k] > 0);
+                            if(k_pengganti.length > 0){
+                                k_pengganti.sort((a, b) => hari_kerja[b] - hari_kerja[a]);
+                                yg_libur.push(k_pengganti[0]);
+                                jatah_libur[k_pengganti[0]]--; // Kurangi jatah pengganti
+                            }
+                        }
+                    }
+                    
+                    yg_kerja = semua_karyawan.filter(k => !yg_libur.includes(k));
+                }
+
+                // Update memori hari kerja untuk iterasi besoknya
+                semua_karyawan.forEach(k => {
+                    if (yg_libur.includes(k)) hari_kerja[k] = 0; // Reset
+                    else hari_kerja[k]++; // Tambah
+                });
+
+                // 4. Pembagian Shift
+                let kandidat_shift = yg_kerja.filter(k => k !== petugas_so);
+                let shift_pagi = [];
+                let shift_siang = [];
+                
+                // LIMIT DINAMIS: Mengizinkan ada 3 orang dalam 1 shift jika tidak ada yang libur (5 personil kerja)
+                let max_per_shift = Math.ceil(kandidat_shift.length / 2);
+
+                let rio_terplot = false;
+                if (kandidat_shift.includes("Rio j")) {
+                    if (hari === 15) { shift_siang.push("Rio j"); rio_terplot = true; }
+                    else if (hari === 16) { shift_pagi.push("Rio j"); rio_terplot = true; }
+                    else if (hari === 1) { shift_pagi.push("Rio j"); rio_terplot = true; }
+                    else if (hari === total_hari) { shift_siang.push("Rio j"); rio_terplot = true; }
+                }
+
+                let kandidat_sisa_prioritas = kandidat_shift.filter(k => !(k === "Rio j" && rio_terplot));
+                
+                let wajib_pagi = [];
+                let wajib_siang = [];
+                
+                if (petugas_so === null) {
+                    // Simulasi memprediksi siapa libur besok agar tidak over-shift (Shift Siang berlanjut Shift Pagi)
+                    let orang_libur_besok = req_libur[hari_esok] ? [...req_libur[hari_esok]] : [];
+                    if (orang_libur_besok.length === 0 && !req_so[hari_esok] && hari_esok <= total_hari) {
+                        let k_besok = semua_karyawan.filter(x => jatah_libur[x] > 0);
+                        if (k_besok.length > 0) {
+                            k_besok.sort((a, b) => (hari_kerja[b] + 1) - (hari_kerja[a] + 1));
+                            let terpilih_b = k_besok[0];
+                            let sisa_h_b = total_hari - hari_esok + 1;
+                            let tot_j_b = semua_karyawan.reduce((sum, x) => sum + jatah_libur[x], 0);
+                            
+                            if (tot_j_b >= sisa_h_b || (hari_kerja[terpilih_b] + 1) >= 5) {
+                                orang_libur_besok = [terpilih_b];
+                                if (orang_libur_besok.includes("Rio j") && [1, 15, 16, total_hari].includes(hari_esok)) {
+                                    let rep = semua_karyawan.filter(x => x !== "Rio j" && jatah_libur[x] > 0).sort((a,b)=>(hari_kerja[b]+1)-(hari_kerja[a]+1));
+                                    if(rep.length > 0) orang_libur_besok = [rep[0]];
+                                }
+                            }
+                        }
+                    }
+
+                    kandidat_sisa_prioritas.forEach(k => {
                         if (req_so[hari_esok]) orang_libur_besok = [];
                         if (orang_libur_besok.includes(k)) wajib_pagi.push(k);
                     });
@@ -305,14 +461,13 @@
                     });
                 }
 
-                wajib_pagi.forEach(k => { if(shift_pagi.length < 2) shift_pagi.push(k); else shift_siang.push(k); });
-                wajib_siang.forEach(k => { if(shift_siang.length < 2) shift_siang.push(k); else shift_pagi.push(k); });
+                wajib_pagi.forEach(k => { if(shift_pagi.length < max_per_shift) shift_pagi.push(k); else shift_siang.push(k); });
+                wajib_siang.forEach(k => { if(shift_siang.length < max_per_shift) shift_siang.push(k); else shift_pagi.push(k); });
 
                 let alokasi_akhir = kandidat_shift.filter(k => !shift_pagi.includes(k) && !shift_siang.includes(k));
                 let staf_sisa = alokasi_akhir.filter(s => staff_list.includes(s));
                 let crew_sisa = alokasi_akhir.filter(c => crew_list.includes(c));
 
-                // Rotasi Ganjil/Genap untuk yang tersisa (Solusi formasi kaku saat cuti panjang)
                 if (staf_sisa.length > 0) staf_sisa = [...staf_sisa.slice(hari % staf_sisa.length), ...staf_sisa.slice(0, hari % staf_sisa.length)];
                 if (crew_sisa.length > 0) crew_sisa = [...crew_sisa.slice(hari % crew_sisa.length), ...crew_sisa.slice(0, hari % crew_sisa.length)];
 
@@ -321,10 +476,10 @@
                     let crew_di_siang = shift_siang.some(x => crew_list.includes(x));
                     
                     if (!crew_di_pagi && !crew_di_siang) {
-                        if (hari % 2 === 0 && shift_siang.length < 2) shift_siang.push(c);
-                        else if (shift_pagi.length < 2) shift_pagi.push(c);
+                        if (hari % 2 === 0 && shift_siang.length < max_per_shift) shift_siang.push(c);
+                        else if (shift_pagi.length < max_per_shift) shift_pagi.push(c);
                         else shift_siang.push(c);
-                    } else if (!crew_di_pagi && shift_pagi.length < 2) {
+                    } else if (!crew_di_pagi && shift_pagi.length < max_per_shift) {
                         shift_pagi.push(c);
                     } else {
                         shift_siang.push(c);
@@ -332,7 +487,7 @@
                 });
 
                 staf_sisa.forEach(s => {
-                    if (shift_pagi.length < 2) shift_pagi.push(s);
+                    if (shift_pagi.length < max_per_shift) shift_pagi.push(s);
                     else shift_siang.push(s);
                 });
 
@@ -351,56 +506,3 @@
             }
             return jadwal;
         }
-
-        function generateAndRenderSchedule() {
-            simpanKeMemori(); // Simpan otomatis setiap ada perubahan
-            
-            let req_libur = parseCuti();
-            let req_so = parseSO();
-            globalJadwal = generateSchedule(req_libur, req_so, num_days);
-            
-            let tableHtml = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Tanggal</th>
-                            <th>Libur / Cuti</th>
-                            <th>Shift Pagi</th>
-                            <th>Shift Siang</th>
-                            <th>Perbantuan SO</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-            `;
-            
-            globalJadwal.forEach(row => {
-                tableHtml += `
-                    <tr>
-                        <td>${row.Tanggal}</td>
-                        <td>${row["Libur / Cuti"]}</td>
-                        <td>${row["Shift Pagi"]}</td>
-                        <td>${row["Shift Siang"]}</td>
-                        <td>${row["Perbantuan SO"]}</td>
-                    </tr>
-                `;
-            });
-            tableHtml += `</tbody></table>`;
-            document.getElementById('table-container').innerHTML = tableHtml;
-        }
-
-        function exportExcel() {
-            if(globalJadwal.length === 0) return;
-            const worksheet = XLSX.utils.json_to_sheet(globalJadwal);
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, "Jadwal Kerja");
-            XLSX.writeFile(workbook, `Jadwal_Kerja_${nama_bulan.replace(' ', '_')}.xlsx`);
-        }
-
-        // Saat halaman dimuat, panggil memori dulu, baru buat jadwal
-        window.onload = function() {
-            muatDariMemori();
-            generateAndRenderSchedule();
-        };
-    </script>
-</body>
-</html>
