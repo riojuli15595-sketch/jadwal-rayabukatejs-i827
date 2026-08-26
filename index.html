@@ -262,6 +262,39 @@ function shiftScore(c,people,d){
         if(h[n].lastShift==='Pagi'&&p.includes(n))v+=80;
     });
 
+    /* ========================================================
+       ATURAN KERAS KOMPOSISI SHIFT
+       ========================================================
+       Jika ada 4 orang bekerja (kondisi normal: 1 orang libur),
+       WAJIB 2 orang Pagi + 2 orang Siang.
+       Masing-masing shift harus berisi minimal 1 Staf + 1 Crew.
+
+       Jika hanya 3 orang bekerja (misalnya ada SO), pembagian
+       2 + 1 dipakai. Shift Siang diprioritaskan berisi 2 orang
+       bila tidak bertentangan dengan aturan shift wajib.
+    */
+    const staffAvailable=sp.length+ss.length;
+    const crewAvailable=cp.length+cs.length;
+
+    if(people.length>=4){
+        if(p.length!==2 || s.length!==2) v+=10000000;
+        if(sp.length===0 || cp.length===0) v+=10000000;
+        if(ss.length===0 || cs.length===0) v+=10000000;
+    }else if(people.length===3){
+        /* Dengan 3 orang, 2 orang di Siang lebih diutamakan. */
+        if(s.length!==2 || p.length!==1) v+=3000000;
+
+        /* Selama memungkinkan, shift Siang harus Staf + Crew. */
+        if(ss.length===0 || cs.length===0) v+=8000000;
+
+        /* Shift Pagi juga diusahakan memiliki Staf/Crew. */
+        if(sp.length===0 || cp.length===0) v+=3000000;
+    }else if(people.length===2){
+        /* Dua orang wajib dibagi 1 Pagi + 1 Siang. */
+        if(p.length!==1 || s.length!==1) v+=10000000;
+        if((sp.length===0 && cp.length===0) || (ss.length===0 && cs.length===0)) v+=5000000;
+    }
+
     /* Staf + Crew diusahakan bercampur. */
     if(cp.length&&sp.length===0)v+=5000;
     if(cs.length&&ss.length===0)v+=5000;
