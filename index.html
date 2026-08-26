@@ -34,15 +34,313 @@ function parseCuti(inp){const r={};karyawan.forEach(k=>{const a=(inp.cuti[k.NIK]
 function parseSO(inp){const r={};for(let d=1;d<=targetDays;d++)if(inp.so[d])r[d]=inp.so[d];return r}
 function previousHistory(){const p=previousPeriod(),st=loadState(p.key),h={};semua_karyawan.forEach(n=>h[n]={lastOff:null,lastShift:null,workStreak:0,pagiTotal:0,siangTotal:0,pagiStreak:0,siangStreak:0});if(!st||!Array.isArray(st.jadwal))return h;st.jadwal.forEach(row=>{const off=splitNames(row['Libur / Cuti']),pg=splitNames(row['Shift Pagi']),sg=splitNames(row['Shift Siang']),so=row['Perbantuan SO'];semua_karyawan.forEach(n=>{if(off.includes(n)){h[n].lastOff=row.Tanggal;h[n].lastShift='Libur';h[n].workStreak=0;h[n].pagiStreak=0;h[n].siangStreak=0}else if(pg.includes(n)){h[n].lastShift='Pagi';h[n].workStreak++;h[n].pagiTotal++;h[n].pagiStreak++;h[n].siangStreak=0}else if(sg.includes(n)){h[n].lastShift='Siang';h[n].workStreak++;h[n].siangTotal++;h[n].siangStreak++;h[n].pagiStreak=0}else if(so===n){h[n].lastShift='SO';h[n].workStreak++;h[n].pagiStreak=0;h[n].siangStreak=0}})});return h}
 function splitNames(x){return(!x||x==='-')?[]:x.split(' & ').filter(Boolean)}
-function generateSchedule(reqOff,reqSO,h){const TARGET=5,MAX=3,offMap={},load=Array(targetDays+1).fill(0),schedule=[];semua_karyawan.forEach(n=>offMap[n]=[]);Object.keys(reqOff).forEach(d=>reqOff[d].forEach(n=>{offMap[n].push(+d);load[+d]++}));semua_karyawan.forEach(n=>offMap[n]=[...new Set(offMap[n])].sort((a,b)=>a-b));
-function rioSpecial(d){return d===1||d===15||d===16||d===targetDays}function carryWork(n,firstOff){if(h[n].lastOff==null)return firstOff-1;const p=previousPeriod();return(p.days-h[n].lastOff)+(firstOff-1)}
-function scoreOff(n,a){const arr=[...offMap[n],...a].sort((x,y)=>x-y);let s=0;if(arr.length){const cw=carryWork(n,arr[0]);if(cw>7)s+=(cw-7)*150;if(cw<5)s+=(5-cw)*30;for(let i=1;i<arr.length;i++){const w=arr[i]-arr[i-1]-1;if(w<5)s+=(5-w)*120;else if(w>7)s+=(w-7)*120}const tail=targetDays-arr[arr.length-1];if(tail>7)s+=(tail-7)*120}a.forEach(d=>s+=load[d]*35);return s}
-function chooseOff(n){const fixed=offMap[n].slice();if(fixed.length>=TARGET)return fixed;const need=TARGET-fixed.length,cand=[];for(let d=1;d<=targetDays;d++){if(fixed.includes(d))continue;if(n==='Rio j'&&rioSpecial(d))continue;cand.push(d)}let beam=[[]];for(let z=0;z<need;z++){const next=[];beam.forEach(a=>{const start=a.length?cand.indexOf(a[a.length-1])+1:0;for(let i=start;i<cand.length;i++)next.push(a.concat(cand[i]))});next.sort((a,b)=>scoreOff(n,a)-scoreOff(n,b));beam=next.slice(0,300)}let best=beam[0]||[];for(const a of beam)if(scoreOff(n,a)<scoreOff(n,best))best=a;return[...new Set([...fixed,...best])].sort((a,b)=>a-b)}
-[...semua_karyawan].sort((a,b)=>offMap[a].length-offMap[b].length).forEach(n=>{offMap[n]=chooseOff(n);offMap[n].forEach(d=>load[d]++)});
-function isOff(n,d){return d>=1&&d<=targetDays&&offMap[n].includes(d)}function reqShift(n,d){let p=isOff(n,d+1),s=isOff(n,d-1);if(n==='Rio j'){if(d===1){p=true;s=false}if(d===15){p=false;s=true}if(d===16){p=true;s=false}if(d===targetDays){p=false;s=true}}if(p&&s&&!(n==='Rio j'&&rioSpecial(d)))p=false;return{p,s}}
-function combos(a){const out=[];for(let mask=0;mask<(1<<a.length);mask++){const p=[],s=[];a.forEach((n,i)=>(mask&(1<<i)?s:p).push(n));if(p.length&&s.length)out.push({p,s})}return out}
-function shiftScore(c,people,d){let v=0;const p=c.p,s=c.s,cp=p.filter(n=>crew_list.includes(n)),cs=s.filter(n=>crew_list.includes(n)),sp=p.filter(n=>staff_list.includes(n)),ss=s.filter(n=>staff_list.includes(n));people.forEach(n=>{const r=reqShift(n,d);if(r.p&&!p.includes(n))v+=1000000;if(r.s&&!s.includes(n))v+=1000000;if(p.includes(n)&&h[n].pagiStreak>=MAX)v+=1000000;if(s.includes(n)&&h[n].siangStreak>=MAX)v+=1000000;const pt=h[n].pagiTotal+(p.includes(n)?1:0),st=h[n].siangTotal+(s.includes(n)?1:0);v+=Math.abs(pt-st)*100;if(h[n].lastShift==='Siang'&&s.includes(n))v+=80;if(h[n].lastShift==='Pagi'&&p.includes(n))v+=80});if(cp.length&&sp.length===0)v+=5000;if(cs.length&&ss.length===0)v+=5000;if(cp.length===2||cs.length===2)v+=4000;v+=Math.abs(p.length-s.length)*10;return v}
-for(let d=1;d<=targetDays;d++){let so=reqSO[d]||null,off=semua_karyawan.filter(n=>isOff(n,d));if(so&&off.includes(so))so=null;const people=semua_karyawan.filter(n=>!off.includes(n)&&n!==so);let pagi=[],siang=[];if(people.length===1){const r=reqShift(people[0],d);if(r.s)siang=[people[0]];else pagi=[people[0]]}else if(people.length>1){let best=null,bv=Infinity;combos(people).forEach(c=>{const v=shiftScore(c,people,d);if(v<bv){bv=v;best=c}});if(best){pagi=best.p;siang=best.s}}semua_karyawan.forEach(n=>{if(off.includes(n)){h[n].lastOff=d;h[n].lastShift='Libur';h[n].workStreak=0;h[n].pagiStreak=0;h[n].siangStreak=0}else if(n===so){h[n].lastShift='SO';h[n].workStreak++;h[n].pagiStreak=0;h[n].siangStreak=0}else if(pagi.includes(n)){h[n].lastShift='Pagi';h[n].workStreak++;h[n].pagiTotal++;h[n].pagiStreak++;h[n].siangStreak=0}else if(siang.includes(n)){h[n].lastShift='Siang';h[n].workStreak++;h[n].siangTotal++;h[n].siangStreak++;h[n].pagiStreak=0}});schedule.push({'Tanggal':d,'Libur / Cuti':off.length?off.join(' & '):'-','Shift Pagi':pagi.length?pagi.join(' & '):'-','Shift Siang':siang.length?siang.join(' & '):'-','Perbantuan SO':so||'-'})}return{jadwal:schedule,history:h}}
+function generateSchedule(reqOff,reqSO,h){
+const TARGET=5,MAX=3;
+const offMap={},load=Array(targetDays+1).fill(0),schedule=[];
+semua_karyawan.forEach(n=>offMap[n]=[]);
+
+/* ============================================================
+   REQUEST MANUAL
+   ============================================================ */
+Object.keys(reqOff).forEach(d=>{
+    const day=+d;
+    (reqOff[d]||[]).forEach(n=>{
+        if(offMap[n] && !offMap[n].includes(day)) offMap[n].push(day);
+    });
+});
+semua_karyawan.forEach(n=>offMap[n]=[...new Set(offMap[n])].sort((a,b)=>a-b));
+
+function rioSpecial(d){return d===1||d===15||d===16||d===targetDays}
+
+function carryWork(n,firstOff){
+    if(h[n].lastOff==null) return firstOff-1;
+    const p=previousPeriod();
+    return (p.days-h[n].lastOff)+(firstOff-1);
+}
+
+/* Penalti pola libur. Ideal 5-7 hari kerja di antara libur. */
+function offPatternScore(n,arr){
+    const a=[...arr].sort((x,y)=>x-y);
+    let s=0;
+    if(!a.length) return 999999;
+
+    const firstWork=carryWork(n,a[0]);
+    if(firstWork<5) s+=(5-firstWork)*100;
+    if(firstWork>7) s+=(firstWork-7)*160;
+
+    for(let i=1;i<a.length;i++){
+        const work=a[i]-a[i-1]-1;
+        if(work<5) s+=(5-work)*180;
+        if(work>7) s+=(work-7)*180;
+    }
+
+    const tail=targetDays-a[a.length-1];
+    if(tail>7) s+=(tail-7)*160;
+    if(tail<3) s+=(3-tail)*25;
+
+    return s;
+}
+
+/*
+ * Prioritas request manual:
+ * jika beberapa orang meminta tanggal yang sama,
+ * hanya SATU yang boleh libur pada tanggal tersebut.
+ * Request yang kalah akan dipindahkan ke tanggal kosong terdekat.
+ */
+const manualByDay={};
+for(let d=1;d<=targetDays;d++) manualByDay[d]=[];
+semua_karyawan.forEach(n=>offMap[n].forEach(d=>manualByDay[d].push(n)));
+
+/* Pilih request manual yang dipertahankan. Prioritas:
+   1) Rio special tidak menjadi prioritas jika bertabrakan dengan orang lain,
+   2) request yang lebih awal dipertahankan,
+   3) jumlah request per orang yang lebih sedikit diberi kesempatan.
+*/
+const fixedChosen={};
+semua_karyawan.forEach(n=>fixedChosen[n]=[]);
+
+for(let d=1;d<=targetDays;d++){
+    let arr=manualByDay[d].slice();
+    if(!arr.length) continue;
+    arr.sort((a,b)=>{
+        const aRio=a==='Rio j'&&rioSpecial(d)?1:0;
+        const bRio=b==='Rio j'&&rioSpecial(d)?1:0;
+        if(aRio!==bRio) return bRio-aRio;
+        if(offMap[a].length!==offMap[b].length) return offMap[a].length-offMap[b].length;
+        return semua_karyawan.indexOf(a)-semua_karyawan.indexOf(b);
+    });
+    fixedChosen[arr[0]].push(d);
+    load[d]=1;
+}
+
+/*
+ * Cari kombinasi tambahan untuk setiap karyawan.
+ * Setiap tanggal maksimal SATU orang libur.
+ */
+function chooseOff(n){
+    const fixed=[...fixedChosen[n]].sort((a,b)=>a-b);
+    const need=TARGET-fixed.length;
+    if(need<=0) return fixed;
+
+    let cand=[];
+    for(let d=1;d<=targetDays;d++){
+        if(fixed.includes(d)) continue;
+        if(load[d]>=1) continue;                 // satu hari = satu libur
+        if(n==='Rio j' && rioSpecial(d)) continue;
+        cand.push(d);
+    }
+
+    /* Beam search: cukup besar untuk mencari pola 5-7 hari tanpa berat. */
+    let beam=[[]];
+    for(let z=0;z<need;z++){
+        const next=[];
+        beam.forEach(a=>{
+            const last=a.length?a[a.length-1]:0;
+            cand.forEach(d=>{
+                if(d<=last) return;
+                const candidate=a.concat(d);
+                const all=[...fixed,...candidate].sort((x,y)=>x-y);
+                let score=offPatternScore(n,all);
+                /* Hindari terlalu berdekatan sejak awal. */
+                if(a.length){
+                    const gap=d-last-1;
+                    if(gap<5) score+=(5-gap)*120;
+                    if(gap>7) score+=(gap-7)*120;
+                }
+                score+=load[d]*1000;
+                next.push({a:candidate,score});
+            });
+        });
+        next.sort((x,y)=>x.score-y.score);
+        const seen=new Set(),keep=[];
+        for(const item of next){
+            const sig=item.a.join(',');
+            if(seen.has(sig)) continue;
+            seen.add(sig);keep.push(item);
+            if(keep.length>=500) break;
+        }
+        beam=keep.map(x=>x.a);
+    }
+
+    if(!beam.length) return fixed;
+    let best=beam[0],bestScore=Infinity;
+    for(const a of beam){
+        const all=[...fixed,...a].sort((x,y)=>x-y);
+        let score=offPatternScore(n,all);
+        a.forEach(d=>{score+=load[d]*1000});
+        if(score<bestScore){bestScore=score;best=a}
+    }
+    return [...new Set([...fixed,...best])].sort((a,b)=>a-b);
+}
+
+/*
+ * Urutan penting: orang dengan request manual paling banyak
+ * diproses dulu supaya request mereka tidak mudah hilang.
+ */
+const order=[...semua_karyawan].sort((a,b)=>{
+    if(fixedChosen[b].length!==fixedChosen[a].length) return fixedChosen[b].length-fixedChosen[a].length;
+    return (h[a].lastOff||0)-(h[b].lastOff||0);
+});
+
+order.forEach(n=>{
+    offMap[n]=chooseOff(n);
+    offMap[n].forEach(d=>load[d]++);
+});
+
+/*
+ * Jaminan akhir: setiap orang tepat 5 hari libur dan setiap tanggal
+ * maksimal satu orang libur. Jika masih kurang karena konflik request,
+ * isi dari tanggal kosong terdekat dengan pola kerja terbaik.
+ */
+for(const n of semua_karyawan){
+    while(offMap[n].length<TARGET){
+        let candidates=[];
+        for(let d=1;d<=targetDays;d++){
+            if(offMap[n].includes(d)||load[d]>=1) continue;
+            if(n==='Rio j'&&rioSpecial(d)) continue;
+            const test=[...offMap[n],d].sort((a,b)=>a-b);
+            let score=offPatternScore(n,test)+load[d]*1000;
+            candidates.push({d,score});
+        }
+        candidates.sort((a,b)=>a.score-b.score);
+        if(!candidates.length) break;
+        const pick=candidates[0].d;
+        offMap[n].push(pick);offMap[n].sort((a,b)=>a-b);load[pick]++;
+    }
+}
+
+/* ============================================================
+   SHIFT
+   ============================================================ */
+function isOff(n,d){return d>=1&&d<=targetDays&&offMap[n].includes(d)}
+
+function reqShift(n,d){
+    let p=isOff(n,d+1),s=isOff(n,d-1);
+
+    /* Sebelum libur = Pagi, sesudah libur = Siang. */
+    if(n==='Rio j'){
+        if(d===1){p=true;s=false}
+        if(d===15){p=false;s=true}
+        if(d===16){p=true;s=false}
+        if(d===targetDays){p=false;s=true}
+    }
+
+    if(p&&s && !(n==='Rio j'&&rioSpecial(d))) p=false;
+    return{p,s};
+}
+
+function combos(a){
+    const out=[];
+    for(let mask=0;mask<(1<<a.length);mask++){
+        const p=[],s=[];
+        a.forEach((n,i)=>(mask&(1<<i)?s:p).push(n));
+        if(p.length&&s.length) out.push({p,s});
+    }
+    return out;
+}
+
+function shiftScore(c,people,d){
+    let v=0;
+    const p=c.p,s=c.s;
+    const cp=p.filter(n=>crew_list.includes(n));
+    const cs=s.filter(n=>crew_list.includes(n));
+    const sp=p.filter(n=>staff_list.includes(n));
+    const ss=s.filter(n=>staff_list.includes(n));
+
+    people.forEach(n=>{
+        const r=reqShift(n,d);
+        if(r.p&&!p.includes(n))v+=1000000;
+        if(r.s&&!s.includes(n))v+=1000000;
+        if(p.includes(n)&&h[n].pagiStreak>=MAX)v+=1000000;
+        if(s.includes(n)&&h[n].siangStreak>=MAX)v+=1000000;
+
+        const pt=h[n].pagiTotal+(p.includes(n)?1:0);
+        const st=h[n].siangTotal+(s.includes(n)?1:0);
+        v+=Math.abs(pt-st)*100;
+
+        if(h[n].lastShift==='Siang'&&s.includes(n))v+=80;
+        if(h[n].lastShift==='Pagi'&&p.includes(n))v+=80;
+    });
+
+    /* Staf + Crew diusahakan bercampur. */
+    if(cp.length&&sp.length===0)v+=5000;
+    if(cs.length&&ss.length===0)v+=5000;
+
+    /* Dua Crew yang bekerja diusahakan terpisah. */
+    if(cp.length===2||cs.length===2)v+=4000;
+
+    v+=Math.abs(p.length-s.length)*10;
+    return v;
+}
+
+/* ============================================================
+   BUAT JADWAL HARIAN
+   ============================================================ */
+for(let d=1;d<=targetDays;d++){
+    let so=reqSO[d]||null;
+    let off=semua_karyawan.filter(n=>isOff(n,d));
+
+    /* Jaminan keras: maksimal satu orang libur per tanggal. */
+    if(off.length>1){
+        off.sort((a,b)=>{
+            const ar=fixedChosen[a].includes(d)?1:0;
+            const br=fixedChosen[b].includes(d)?1:0;
+            if(ar!==br)return br-ar;
+            return (h[a].lastOff||0)-(h[b].lastOff||0);
+        });
+        const keep=off[0];
+        off.forEach(n=>{
+            if(n!==keep){
+                offMap[n]=offMap[n].filter(x=>x!==d);
+                load[d]--;
+            }
+        });
+        off=[keep];
+    }
+
+    if(so&&off.includes(so))so=null;
+    const people=semua_karyawan.filter(n=>!off.includes(n)&&n!==so);
+    let pagi=[],siang=[];
+
+    if(people.length===1){
+        const r=reqShift(people[0],d);
+        if(r.s)siang=[people[0]];else pagi=[people[0]];
+    }else if(people.length>1){
+        let best=null,bv=Infinity;
+        combos(people).forEach(c=>{
+            const v=shiftScore(c,people,d);
+            if(v<bv){bv=v;best=c}
+        });
+        if(best){pagi=best.p;siang=best.s}
+    }
+
+    semua_karyawan.forEach(n=>{
+        if(off.includes(n)){
+            h[n].lastOff=d;h[n].lastShift='Libur';h[n].workStreak=0;h[n].pagiStreak=0;h[n].siangStreak=0;
+        }else if(n===so){
+            h[n].lastShift='SO';h[n].workStreak++;h[n].pagiStreak=0;h[n].siangStreak=0;
+        }else if(pagi.includes(n)){
+            h[n].lastShift='Pagi';h[n].workStreak++;h[n].pagiTotal++;h[n].pagiStreak++;h[n].siangStreak=0;
+        }else if(siang.includes(n)){
+            h[n].lastShift='Siang';h[n].workStreak++;h[n].siangTotal++;h[n].siangStreak++;h[n].pagiStreak=0;
+        }
+    });
+
+    schedule.push({
+        'Tanggal':d,
+        'Libur / Cuti':off.length?off.join(' & '):'-',
+        'Shift Pagi':pagi.length?pagi.join(' & '):'-',
+        'Shift Siang':siang.length?siang.join(' & '):'-',
+        'Perbantuan SO':so||'-'
+    });
+}
+
+/* Jika ada konflik request manual, tampilkan peringatan di console. */
+const konflik=Object.keys(reqOff).filter(d=>(reqOff[d]||[]).length>1);
+if(konflik.length) console.warn('Request libur bertabrakan pada tanggal:',konflik.join(', '),'-> sistem mempertahankan maksimal 1 orang libur per hari.');
+
+return{jadwal:schedule,history:h}
+}
 function render(j){let x='<table><thead><tr><th>Tanggal</th><th>Libur / Cuti</th><th>Shift Pagi</th><th>Shift Siang</th><th>Perbantuan SO</th></tr></thead><tbody>';j.forEach(r=>x+=`<tr><td><b>${r.Tanggal}</b></td><td style="color:${r['Libur / Cuti']!=='-'?'#dc2626':'inherit'};font-weight:${r['Libur / Cuti']!=='-'?'700':'400'}">${esc(r['Libur / Cuti'])}</td><td>${esc(r['Shift Pagi'])}</td><td>${esc(r['Shift Siang'])}</td><td>${esc(r['Perbantuan SO'])}</td></tr>`);document.getElementById('table-container').innerHTML=x+'</tbody></table>';summary(j)}
 function summary(j){let x='<div class="summary"><b>Rekap shift</b><table><thead><tr><th>Nama</th><th>Libur</th><th>Pagi</th><th>Siang</th></tr></thead><tbody>';semua_karyawan.forEach(n=>{let o=0,p=0,s=0;j.forEach(r=>{if(splitNames(r['Libur / Cuti']).includes(n))o++;if(splitNames(r['Shift Pagi']).includes(n))p++;if(splitNames(r['Shift Siang']).includes(n))s++});x+=`<tr><td>${esc(n)}</td><td>${o}</td><td>${p}</td><td>${s}</td></tr>`});document.getElementById('summary-container').innerHTML=x+'</tbody></table></div>'}
 function generateAndSave(force){if(!force){const st=loadState(currentKey);if(st&&st.jadwal){globalJadwal=st.jadwal;writeInputs(st.inputs);render(globalJadwal);return}}const inp=readInputs(),res=generateSchedule(parseCuti(inp),parseSO(inp),previousHistory());globalJadwal=res.jadwal;saveState(currentKey,{version:4,year:targetYear,month:targetMonth,days:targetDays,inputs:inp,jadwal:globalJadwal,history:res.history,savedAt:new Date().toISOString()});render(globalJadwal)}
